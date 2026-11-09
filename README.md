@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎧 Song Mixer
+# Song Mixer
 
 **Remove vocals, blend songs, and make mashups by describing what you want in plain English.**
 
