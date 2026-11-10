@@ -102,6 +102,17 @@ def job_status(job_id):
     return jsonify(job)
 
 
+@app.get("/songs/<song_id>")
+def song_file(song_id):
+    if not song_id.isalnum():
+        abort(404)
+    try:
+        path = engine.song_path(song_id)
+    except engine.RecipeError:
+        abort(404)
+    return send_from_directory(engine.UPLOADS, path.name, conditional=True)
+
+
 @app.get("/files/<path:name>")
 def files(name):
     return send_from_directory(engine.OUTPUTS, name, as_attachment=request.args.get("dl") == "1")

@@ -8,6 +8,8 @@ const icon = {
   warn: '<svg viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>',
   ret: '<svg viewBox="0 0 24 24"><path d="M9 10l-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>',
   down: '<svg viewBox="0 0 24 24"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></svg>',
+  play: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="4.5" height="14" rx="1.2"/><rect x="13.5" y="5" width="4.5" height="14" rx="1.2"/></svg>',
   spark: '<svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>',
 };
 const pixels = '<span class="pixels">' + "<i></i>".repeat(9) + "</span>";
@@ -60,12 +62,23 @@ function renderSlots() {
       slot.innerHTML = `<div class="song-head"><div class="letter">${L}</div><div style="min-width:0"><div class="song-name">${esc(state.loading[L])}</div>
         <div class="thinking">${pixels}<span class="shimmer">Listening for tempo & key</span></div></div></div>`;
     } else if (s) {
-      slot.className = "slot filled fade-in";
-      slot.innerHTML = `<div class="song-head"><div class="letter">${L}</div><div style="min-width:0"><div class="song-name" title="${esc(s.name)}">${esc(s.name)}</div>
+      const active = preview.letter === L && preview.id === s.id;
+      const isNew = slot.dataset.sid !== s.id;
+      slot.dataset.sid = s.id;
+      slot.className = "slot filled" + (active ? (preview.audio.paused ? " paused" : " playing") : "") + (isNew ? " fade-in" : "");
+      slot.innerHTML = `<div class="song-head"><div class="letter">${L}</div><div><div class="song-name" title="${esc(s.name)}">${esc(s.name)}</div>
         <div class="song-sub">Song ${L}</div></div><button class="remove" aria-label="Remove song ${L}">${icon.x}</button></div>
-        <div class="facts"><span class="fact">${fmt(s.duration)}</span><span class="fact">${s.bpm} BPM</span><span class="fact">${esc(s.key)}</span></div>`;
-      $(".remove", slot).onclick = (e) => { e.stopPropagation(); state.songs[L] = null; renderSlots(); };
+        <div class="scrub" title="Jump to"><i></i></div>
+        <div class="song-foot"><div class="facts"><span class="fact">${fmt(s.duration)}</span><span class="fact">${s.bpm} BPM</span><span class="fact">${esc(s.key)}</span></div>
+        <button class="play" aria-label="Play song ${L}">${active && !preview.audio.paused ? icon.pause : icon.play}</button></div>`;
+      $(".remove", slot).onclick = (e) => { e.stopPropagation(); if (preview.letter === L) stopPreview(); state.songs[L] = null; renderSlots(); };
+      $(".play", slot).onclick = (e) => { e.stopPropagation(); togglePreview(L); };
+      $(".scrub", slot).onclick = (e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        if (preview.audio.duration) preview.audio.currentTime = ((e.clientX - r.left) / r.width) * preview.audio.duration;
+      };
     } else {
+      delete slot.dataset.sid;
       slot.className = "slot empty";
       slot.innerHTML = `<div><div class="plus">${icon.plus}</div><div>Drop song ${L}</div><div class="optional">${L === "A" ? "MP3, WAV, M4A…" : "optional, for mixing"}</div></div>`;
     }
@@ -73,6 +86,33 @@ function renderSlots() {
   const n = songCount();
   document.querySelectorAll("[data-preset]").forEach((b) => (b.disabled = n < +b.dataset.needs));
 }
+
+/* one shared player for song previews */
+const preview = { audio: new Audio(), letter: null, id: null };
+preview.audio.preload = "none";
+function togglePreview(L) {
+  const s = state.songs[L];
+  if (preview.letter !== L || preview.id !== s.id) {
+    stopPreview();
+    const result = $("#player");
+    if (result) result.pause();
+    preview.audio.src = `/songs/${s.id}`;
+    preview.letter = L;
+    preview.id = s.id;
+  }
+  preview.audio.paused ? preview.audio.play() : preview.audio.pause();
+}
+function stopPreview() {
+  preview.audio.pause();
+  preview.letter = preview.id = null;
+  renderSlots();
+}
+preview.audio.onplay = preview.audio.onpause = () => renderSlots();
+preview.audio.onended = stopPreview;
+preview.audio.ontimeupdate = () => {
+  const bar = preview.letter && $(`.slot[data-letter="${preview.letter}"] .scrub i`);
+  if (bar && preview.audio.duration) bar.style.width = (100 * preview.audio.currentTime) / preview.audio.duration + "%";
+};
 
 async function addSong(L, file) {
   state.loading[L] = file.name.replace(/\.[^.]+$/, "");
@@ -206,7 +246,7 @@ function renderResult(r, job) {
       ${FOLLOWUPS.map((f) => `<button class="follow" data-f="${esc(f)}">${icon.ret}<span>${esc(f)}</span></button>`).join("")}</div>
   </div>`;
   const p = $("#player"), disc = $("#disc");
-  p.onplay = () => disc.classList.add("playing");
+  p.onplay = () => { disc.classList.add("playing"); if (!preview.audio.paused) preview.audio.pause(); };
   p.onpause = p.onended = () => disc.classList.remove("playing");
   document.querySelectorAll(".follow").forEach((b) => (b.onclick = () => {
     if (!state.ai) return toast("Tweaks need typed instructions, which are off.");
